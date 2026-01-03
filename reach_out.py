@@ -69,21 +69,21 @@ def send_email(handle, message: str, subject: str):
     html_message = convert_text_to_html(message)
     msg.attach(MIMEText(html_message, 'html'))
     
-    # pdf_path = 'SAUMAC_PRESSKIT.pdf'
-    # if os.path.exists(pdf_path):
-    #     with open(pdf_path, 'rb') as attachment:
-    #         part = MIMEBase('application', 'octet-stream')
-    #         part.set_payload(attachment.read())
+    pdf_path = 'SAUMAC_PRESSKIT.pdf'
+    if os.path.exists(pdf_path):
+        with open(pdf_path, 'rb') as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
         
-    #     encoders.encode_base64(part)
-    #     part.add_header(
-    #         'Content-Disposition',
-    #         f'attachment; filename= {os.path.basename(pdf_path)}'
-    #     )
-    #     msg.attach(part)
-    #     print(f"- Attached PDF: {os.path.basename(pdf_path)}")
-    # elif pdf_path:
-    #     print(f"- Warning: PDF file not found: {pdf_path}")
+        encoders.encode_base64(part)
+        part.add_header(
+            'Content-Disposition',
+            f'attachment; filename= {os.path.basename(pdf_path)}'
+        )
+        msg.attach(part)
+        print(f"- Attached PDF: {os.path.basename(pdf_path)}")
+    elif pdf_path:
+        print(f"- Warning: PDF file not found: {pdf_path}")
     
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
@@ -149,7 +149,7 @@ for i in range(len(df)):
     elif df.iloc[i]['Channel'] == 'instagram':
         sent = send_instagram(df.iloc[i]['Handle'], message)
     
-    # if sent:
-        # df.loc[i, 'Contacted'] = 'Yes'
-        # df.to_csv('data.csv', index=False)
+    if sent:
+        df.loc[i, 'Contacted'] = 'Yes'
+        df.to_csv('data.csv', index=False)
 
