@@ -284,7 +284,7 @@ def convert_text_to_html(text: str) -> str:
     return html
 
 def generate_message(row):
-    message_file_name = f"{row['Message_Type']}_{row['Language']}.txt"
+    message_file_name = f"{str(row['Channel']).capitalize()}/{row['Message_Type']}_{row['Language']}.txt"
     with open(message_file_name, 'r') as f:
         all_text = f.read()
 
