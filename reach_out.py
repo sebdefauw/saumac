@@ -9,6 +9,8 @@ from email.mime.base import MIMEBase
 from email import encoders
 import gspread
 from google.oauth2.service_account import Credentials
+from instagrapi import Client
+from instagrapi.exceptions import LoginRequired, PleaseWaitFewMinutes, ChallengeRequired
 
 dotenv.load_dotenv()
 
@@ -201,7 +203,7 @@ def check_row(row):
     if row['Language'] not in ['EN', 'FR']:
         print(f"Invalid language: {row['Language']}")
         return False
-    message_file_name = f"{row['Message_Type']}_{row['Language']}.txt"
+    message_file_name = f"messages/{str(row['Channel']).capitalize()}_{row['Message_Type']}_{row['Language']}.txt"
     if not os.path.exists(message_file_name):
         print(f"Message file not found: {message_file_name}")
         return False
@@ -261,10 +263,125 @@ def send_email(handle, message: str, subject: str):
         return False
 
 def send_instagram(handle, message):
-    print(f"-X- Instagram not supported yet")
-    return False
-    print(f"- Sent by Instagram to {handle}")
-    return False
+    """
+    Send a direct message via Instagram using instagrapi.
+    
+    Args:
+        handle: Instagram username (without @)
+        message: Message text to send
+    
+    Returns:
+        bool: True if message sent successfully, False otherwise
+    """
+    if not message:
+        print(f"Instagram message is empty!")
+        return False
+    
+    # Get Instagram credentials from environment
+    instagram_username = os.getenv('INSTAGRAM_USERNAME')
+    instagram_password = os.getenv('INSTAGRAM_PASSWORD')
+    
+    if not instagram_username or not instagram_password:
+        print(f"-X- Instagram credentials not set. Please set INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD in .env file")
+        return False
+    
+    # Remove @ if present in handle
+    handle = handle.lstrip('@')
+    
+    try:
+        # Initialize Instagram client
+        cl = Client()
+        
+        # Login to Instagram
+        try:
+            cl.login(instagram_username, instagram_password)
+            print(f"- Logged in to Instagram as {instagram_username}")
+        except LoginRequired:
+            print(f"-X- Login required. Instagram may require additional verification.")
+            return False
+        except ChallengeRequired:
+            print(f"-X- Challenge required. Please log in manually through a browser first.")
+            print(f"   Instagram may require you to verify your identity. Try logging in through the app first.")
+            return False
+        except Exception as e:
+            print(f"-X- Failed to login to Instagram: {e}")
+            return False
+        
+        # Get user ID from username
+        # Workaround for instagrapi 2.2.1 bug with extract_user_gql
+        user_id = None
+        try:
+            # Try using search_users first (this method doesn't use the buggy extract_user_gql)
+            try:
+                results = cl.search_users(handle)
+                if results:
+                    # Find exact match by username
+                    for user in results:
+                        if user.username.lower() == handle.lower():
+                            user_id = user.pk
+                            break
+                    # If no exact match, use first result
+                    if not user_id and results:
+                        user_id = results[0].pk
+                        print(f"- Warning: Using first search result for @{handle}")
+            except Exception as search_error:
+                # If search fails, try direct methods
+                pass
+            
+            # If search didn't work, try user_info (different endpoint)
+            if not user_id:
+                try:
+                    user_info = cl.user_info(handle)
+                    user_id = user_info.pk
+                except Exception:
+                    # Last resort: try the original method (might work in some cases)
+                    try:
+                        user_id = cl.user_id_from_username(handle)
+                    except TypeError as e:
+                        if "update_headers" in str(e) or "unexpected keyword argument" in str(e):
+                            raise Exception("Instagram API compatibility issue. The instagrapi library has a bug. Please report this issue or try a different approach.")
+                        raise
+            
+            if not user_id:
+                raise Exception("Could not retrieve user ID using any method")
+                
+            print(f"- Found user ID for @{handle}")
+        except Exception as e:
+            error_msg = str(e)
+            if "update_headers" in error_msg or "unexpected keyword argument" in error_msg or "compatibility issue" in error_msg:
+                print(f"-X- Instagram API version compatibility issue detected.")
+                print(f"   This is a known bug in instagrapi 2.2.1 with the extract_user_gql function.")
+                print(f"   The search_users workaround should help, but if it fails, you may need to:")
+                print(f"   1. Wait for a library update")
+                print(f"   2. Or manually find user IDs and add them to your data file")
+            else:
+                print(f"-X- Could not find user @{handle}: {e}")
+                print(f"   Make sure the username is correct and the account exists.")
+            return False
+        
+        # Send direct message
+        try:
+            # Clean up message - remove HTML tags and convert to plain text for Instagram
+            # Instagram DMs don't support HTML, so we'll send plain text
+            plain_message = re.sub(r'<[^>]+>', '', message)  # Remove HTML tags
+            plain_message = plain_message.replace('<br>', '\n').replace('<br>\n', '\n')
+            
+            # Send the message
+            cl.direct_send(plain_message, [user_id])
+            print(f"- Sent Instagram DM to @{handle}")
+            return True
+            
+        except PleaseWaitFewMinutes as e:
+            print(f"-X- Rate limited. Please wait a few minutes before sending more messages: {e}")
+            print(f"   Instagram limits how many DMs you can send. Wait before trying again.")
+            return False
+        except Exception as e:
+            print(f"-X- Failed to send Instagram DM: {e}")
+            return False
+            
+    except Exception as e:
+        print(f"-X- Instagram error: {e}")
+        return False
 
 def convert_text_to_html(text: str) -> str:
     """
@@ -284,16 +401,30 @@ def convert_text_to_html(text: str) -> str:
     return html
 
 def generate_message(row):
-    message_file_name = f"{str(row['Channel']).capitalize()}/{row['Message_Type']}_{row['Language']}.txt"
+    message_file_name = f"messages/{str(row['Channel']).capitalize()}_{row['Message_Type']}_{row['Language']}.txt"
     with open(message_file_name, 'r') as f:
         all_text = f.read()
 
-    subject, message = all_text.split('}\n\n')
-    subject = subject.replace('{Subject: ', '')
-    subject = subject.replace('[Name]', row['Name'])
-    subject = subject.replace('[Event Name]', row['Event_Name'])
+    # Check if message has a subject line (email format) or is plain text (Instagram format)
+    if '}\n\n' in all_text and '{Subject:' in all_text:
+        # Email format with subject
+        subject, message = all_text.split('}\n\n')
+        subject = subject.replace('{Subject: ', '')
+        subject = subject.replace('[Name]', row['Name'])
+        subject = subject.replace('[Event Name]', row['Event_Name'])
+    else:
+        print(f"Instagram format - no subject line")
+        # Instagram format - no subject line
+        message = all_text
+        subject = ''  # Instagram doesn't use subjects
+    
+    # Replace placeholders in message
     message = message.replace('[Name]', row['Name'])
     message = message.replace('[Event Name]', row['Event_Name'])
+
+    print(f"Message: {message}")
+    print(f"Subject: {subject}")
+    
     return message, subject
             
 for i in range(len(df)):
