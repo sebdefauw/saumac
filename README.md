@@ -1,5 +1,9 @@
-# SAUMAC
+# How to use
 
-Thomas et Babasbilas!
+## Load data from Google Sheets
 
-Copyright Saumac Music 2026 - All rights reserved.
+Download the data from Google Sheets and save it as `data.csv` in the root directory.
+
+## Send emails
+
+Run the `reach_out.py` script to send emails to the contacts.

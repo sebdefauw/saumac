@@ -99,6 +99,8 @@ def send_email(handle, message: str, subject: str):
         return False
 
 def send_instagram(handle, message):
+    print(f"-X- Instagram not supported yet")
+    return False
     print(f"- Sent by Instagram to {handle}")
     return False
 
