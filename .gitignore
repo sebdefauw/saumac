@@ -2,3 +2,4 @@
 .env
 *scratch*
 data.csv
+*.json
